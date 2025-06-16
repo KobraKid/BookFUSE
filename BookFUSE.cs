@@ -1,0 +1,511 @@
+﻿using Fsp;
+using System.Collections;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using static BookFUSE.CalibreLibrary;
+using FileInfo = Fsp.Interop.FileInfo;
+using VolumeInfo = Fsp.Interop.VolumeInfo;
+
+namespace BookFUSE
+{
+    /// <summary>
+    /// Represents a FUSE file system which translates a Calibre library to a Kavita library.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    class BookFUSE : FileSystemBase
+    {
+        protected static void ThrowIoExceptionWithHResult(int HResult)
+            => throw new IOException(null, HResult);
+        protected static void ThrowIoExceptionWithWin32(int error)
+            => ThrowIoExceptionWithHResult(unchecked((int)(0x80070000 | error)));
+        protected static void ThrowIoExceptionWithNtStatus(int status)
+            => ThrowIoExceptionWithWin32((int)Win32FromNtStatus(status));
+
+        /// <summary>
+        /// Compare series by their names.
+        /// </summary>
+        private class SeriesComparer : IComparer
+        {
+            public int Compare(object? x, object? y)
+            {
+                string xName = (x is null) ? string.Empty :
+                    (x.GetType() == typeof(KeyValuePair<int, Series>) ? ((KeyValuePair<int, Series>)x).Value.Name : ((KeyValuePair<int, string>)x).Value);
+                string yName = (y is null) ? string.Empty :
+                    (y.GetType() == typeof(KeyValuePair<int, Series>) ? ((KeyValuePair<int, Series>)y).Value.Name : ((KeyValuePair<int, string>)y).Value);
+                return string.Compare(xName, yName);
+            }
+        }
+        private static readonly SeriesComparer _seriesComparer = new();
+
+        /// <summary>
+        /// Create a new BookFUSE file system instance.
+        /// </summary>
+        /// <param name="path">The Calibre library file path.</param>
+        public BookFUSE(string path)
+        {
+            _Path = Path.GetFullPath(path);
+            if (_Path.EndsWith('\\'))
+            {
+                _Path = _Path[..^1];
+            }
+            _Library = new(_Path);
+        }
+
+        /// <summary>
+        /// Add the base library path to a file name.
+        /// </summary>
+        /// <param name="fileName">The file name.</param>
+        /// <returns>The file's absolute path.</returns>
+        public string ConcatPath(string fileName)
+            => _Path + fileName;
+
+        public override int ExceptionHandler(Exception ex)
+        {
+            int HResult = ex.HResult;
+            if ((HResult & 0xFFFF0000) == 0x80070000)
+            {
+                return NtStatusFromWin32((uint)HResult & 0xFFFF);
+            }
+            return STATUS_UNEXPECTED_IO_ERROR;
+        }
+
+        public override int Init(object HostObject)
+        {
+            _Library.Init();
+            FileSystemHost host = (FileSystemHost)HostObject;
+            host.SectorSize = ALLOCATION_UNIT;
+            host.SectorsPerAllocationUnit = 1;
+            host.MaxComponentLength = 255;
+            host.FileInfoTimeout = 1000;
+            host.CaseSensitiveSearch = false;
+            host.CasePreservedNames = true;
+            host.UnicodeOnDisk = true;
+            host.PersistentAcls = true;
+            host.PostCleanupWhenModifiedOnly = true;
+            host.PassQueryDirectoryPattern = true;
+            host.FlushAndPurgeOnCleanup = true;
+            host.VolumeCreationTime = (ulong)File.GetCreationTimeUtc(_Path).ToFileTimeUtc();
+            host.VolumeSerialNumber = 0;
+            return STATUS_SUCCESS;
+        }
+
+        public override int GetVolumeInfo(out VolumeInfo VolumeInfo)
+        {
+            VolumeInfo = new()
+            {
+                TotalSize = 65536,
+                FreeSize = 0
+            };
+            VolumeInfo.SetVolumeLabel(_VolumeLabel);
+            return STATUS_SUCCESS;
+        }
+
+        public override int GetSecurityByName(string FileName, out uint FileAttributes, ref byte[] SecurityDescriptor)
+        {
+            FileAttributes attributes = System.IO.FileAttributes.ReadOnly;
+            if (FileName == "\\")
+            {
+                System.IO.FileInfo info = new(ConcatPath(FileName));
+                attributes |= info.Attributes;
+            }
+            else if (_Library.IsSeries(FileName))
+            {
+                attributes |= System.IO.FileAttributes.Directory;
+            }
+            else { } // No additional attributes for books
+            FileAttributes = (uint)attributes;
+            return STATUS_SUCCESS;
+        }
+
+        public override int Open(string FileName, uint CreateOptions, uint GrantedAccess,
+            out object? FileNode, out object? FileDesc, out FileInfo FileInfo, out string? NormalizedName)
+        {
+            // Normalized name is not used
+            NormalizedName = default;
+
+            // Ignore desktop.ini files
+            if (FileName.EndsWith("desktop.ini"))
+            {
+                FileNode = default;
+                FileDesc = default;
+                FileInfo = default;
+                return STATUS_SUCCESS;
+            }
+
+            if (_Library.IsSeries(FileName))
+            {
+                Series series = _Library.GetSeries(FileName);
+                LibraryFileDesc libraryFile = new(_Path, series);
+                libraryFile.GetFileInfo(out FileInfo);
+                FileNode = series;
+                FileDesc = libraryFile;
+                return STATUS_SUCCESS;
+            }
+            else if (_Library.IsBook(FileName))
+            {
+                Book book = _Library.GetBook(FileName);
+                LibraryFileDesc libraryFile = new(_Path, book);
+                libraryFile.GetFileInfo(out FileInfo);
+                FileNode = book;
+                FileDesc = libraryFile;
+                return STATUS_SUCCESS;
+            }
+            else // Filename is the directory root
+            {
+                LibraryFileDesc libraryFile = new(ConcatPath(FileName));
+                libraryFile.GetFileInfo(out FileInfo);
+                FileNode = default;
+                FileDesc = libraryFile;
+                return STATUS_SUCCESS;
+            }
+        }
+
+        public override void Close(object FileNode, object FileDesc)
+        {
+            if (FileDesc is null) { return; }
+
+            ((LibraryFileDesc)FileDesc).Stream?.Dispose();
+        }
+
+        public override int Read(object FileNode, object FileDesc, nint Buffer, ulong Offset, uint Length, out uint BytesTransferred)
+        {
+            if (FileDesc is null)
+            {
+                BytesTransferred = 0;
+                return STATUS_NOT_FOUND;
+            }
+
+            LibraryFileDesc libraryFile = (LibraryFileDesc)FileDesc;
+            if (libraryFile.Stream is null || (ulong)libraryFile.Stream.Length <= Offset)
+            {
+                ThrowIoExceptionWithNtStatus(STATUS_END_OF_FILE);
+            }
+            byte[] bytes = new byte[Length];
+            libraryFile.Stream!.Seek((long)Offset, SeekOrigin.Begin);
+            BytesTransferred = (uint)libraryFile.Stream.Read(bytes, 0, bytes.Length);
+            Marshal.Copy(bytes, 0, Buffer, bytes.Length);
+            return STATUS_SUCCESS;
+        }
+
+        public override int GetFileInfo(object FileNode, object FileDesc, out FileInfo FileInfo)
+        {
+            ((LibraryFileDesc)FileDesc).GetFileInfo(out FileInfo);
+            return STATUS_SUCCESS;
+        }
+
+        public override int GetSecurity(object FileNode, object FileDesc, ref byte[] SecurityDescriptor)
+        {
+            SecurityDescriptor = ((LibraryFileDesc)FileDesc).GetSecurityDescriptor();
+            return STATUS_SUCCESS;
+        }
+
+        public override bool ReadDirectoryEntry(object FileNode, object FileDesc, string Pattern, string Marker, ref object Context, out string? FileName, out FileInfo FileInfo)
+        {
+            LibraryFileDesc libraryFile = (LibraryFileDesc)FileDesc;
+            if (libraryFile.Root != null)
+            {
+                int index;
+                if (Context is null)
+                {
+                    index = 0;
+                    if (Marker != null)
+                    {
+                        index = Array.BinarySearch(_Library.SortedSeries, KeyValuePair.Create(0, Marker), _seriesComparer);
+                        if (index >= 0) { index++; }
+                        else { index = ~index; }
+                    }
+                }
+                else
+                {
+                    index = (int)Context;
+                }
+                if (_Library.SortedSeries.Length > index)
+                {
+                    Context = index + 1;
+                    FileName = _Library.SortedSeries[index].Value.Name;
+                    new LibraryFileDesc(_Path, _Library.SortedSeries[index].Value).GetFileInfo(out FileInfo);
+                    return true;
+                }
+                else
+                {
+                    FileName = default;
+                    FileInfo = default;
+                    return false;
+                }
+            }
+            else if (libraryFile.Series != null)
+            {
+                Series series = libraryFile.Series;
+                Book[] books = [.. series.Books];
+                Array.Sort(books, (b1, b2) => string.Compare(b1.Title, b2.Title));
+                int index;
+                if (Context is null)
+                {
+                    index = 0;
+                    if (Marker != null)
+                    {
+                        index = Array.BinarySearch([.. books.Select(book => book.Title)], Marker);
+                        if (index >= 0)
+                        {
+                            index++;
+                        }
+                        else
+                        {
+                            index = ~index;
+                        }
+                    }
+                }
+                else
+                {
+                    index = (int)Context;
+                }
+                if (books.Length > index)
+                {
+                    Context = index + 1;
+                    FileName = books[index].TitleWithExtension;
+                    LibraryFileDesc bookFileDesc = new(_Path, books[index]);
+                    bookFileDesc.GetFileInfo(out FileInfo);
+                    return true;
+                }
+                else
+                {
+                    FileName = default;
+                    FileInfo = default;
+                    return false;
+                }
+            }
+            else
+            {
+                throw new DirectoryNotFoundException(libraryFile.ToString());
+            }
+        }
+
+        /// <summary>
+        /// The library path.
+        /// </summary>
+        private readonly string _Path;
+        /// <summary>
+        /// The volume label for the file system.
+        /// </summary>
+        private readonly string _VolumeLabel = "BookFUSE";
+        /// <summary>
+        /// The Calibre library instance.
+        /// </summary>
+        private readonly CalibreLibrary _Library;
+        /// <summary>
+        /// The size of the allocation unit for the file system.
+        /// </summary>
+        protected const int ALLOCATION_UNIT = 4096;
+    }
+
+    /// <summary>
+    /// This class implements a Windows service that mounts the BookFUSE file system.
+    /// </summary>
+    class BookFUSEService : Service
+    {
+        /// <summary>
+        /// Represents an exception that occurs when there is an error in the command-line usage.
+        /// </summary>
+        /// <remarks>This exception is typically thrown to indicate that the command-line arguments
+        /// provided by the user are invalid or do not conform to the expected format.</remarks>
+        /// <param name="message">The message to include in the exception</param>
+        private class CommandLineUsageException(string? message = null) : Exception(message)
+        {
+            public bool HasMessage = message != null;
+        }
+
+        /// <summary>
+        /// The program name for logging purposes.
+        /// </summary>
+        private const string PROGNAME = "bookFUSE";
+
+        /// <summary>
+        /// Construct a new BookFUSE service instance.
+        /// </summary>
+        public BookFUSEService() : base(nameof(BookFUSEService)) { }
+
+        /// <summary>
+        /// Handles the startup logic for the application, including parsing command-line arguments and mounting the
+        /// file system.
+        /// </summary>
+        /// <remarks>This method is invoked during the application's startup sequence. It processes the
+        /// provided command-line arguments to configure the file system host and mount the file system. The method
+        /// expects specific options to be passed via the <paramref name="Args"/> parameter, and throws exceptions if
+        /// the arguments are invalid or required options are missing. Supported options include: <list type="bullet">
+        /// <item><description><c>-d</c>: Specifies debug flags.</description></item> <item><description><c>-D</c>:
+        /// Specifies the path to the debug log file.</description></item> <item><description><c>-u</c>: Specifies the
+        /// UNC prefix for the volume.</description></item> <item><description><c>-p</c>: Specifies the path to the
+        /// directory to expose.</description></item> <item><description><c>-m</c>: Specifies the mount point for the
+        /// file system.</description></item> </list> If the required options are not provided or invalid values are
+        /// supplied, a <see cref="CommandLineUsageException"/> is thrown.</remarks>
+        /// <param name="Args">An array of command-line arguments passed to the application.</param>
+        [SupportedOSPlatform("windows")]
+        protected override void OnStart(string[] Args)
+        {
+            try
+            {
+                /* Parse command-line args */
+                string? debugLogFile = null;
+                uint debugFlags = 0;
+                string? volumePrefix = null;
+                string? path = null;
+                string? mountPoint = null;
+                FileSystemHost? host = null;
+                BookFUSE? bookFUSE = null;
+                int i;
+                for (i = 1; i < Args.Length; i++)
+                {
+                    string arg = Args[i];
+                    if (arg[0] != '-') { break; }
+                    switch (arg[1])
+                    {
+                        case '?':
+                            throw new CommandLineUsageException();
+                        case 'd':
+                            ArgToInt(Args, ref i, ref debugFlags);
+                            break;
+                        case 'D':
+                            ArgToString(Args, ref i, ref debugLogFile);
+                            break;
+                        case 'm':
+                            ArgToString(Args, ref i, ref mountPoint);
+                            break;
+                        case 'p':
+                            ArgToString(Args, ref i, ref path);
+                            break;
+                        case 'u':
+                            ArgToString(Args, ref i, ref volumePrefix);
+                            break;
+                        default:
+                            throw new CommandLineUsageException();
+                    }
+                }
+                if (Args.Length > i)
+                {
+                    throw new CommandLineUsageException();
+                }
+                if (path is null && volumePrefix != null)
+                {
+                    i = volumePrefix.IndexOf('\\');
+                    if (i != -1 && i < volumePrefix.Length && volumePrefix[i + 1] != '\\')
+                    {
+                        i = volumePrefix.IndexOf('\\', i + 1);
+                        if (i != -1 && i + 1 < volumePrefix.Length && (
+                            ('A' <= volumePrefix[i + 1] && volumePrefix[i + 1] <= 'Z') ||
+                            ('a' <= volumePrefix[i + 1] && volumePrefix[i + 1] <= 'z')) &&
+                            volumePrefix[i + 2] == '$')
+                        {
+                            path = string.Format("{0}:{1}", volumePrefix[i + 1], volumePrefix[(i + 3)..]);
+                        }
+                    }
+                }
+                if (path is null || mountPoint is null)
+                {
+                    throw new CommandLineUsageException();
+                }
+                if (debugLogFile != null)
+                {
+                    if (FileSystemHost.SetDebugLogFile(debugLogFile) > 0)
+                    {
+                        throw new CommandLineUsageException("cannot open debug log file");
+                    }
+                }
+
+                /* Mount the file system */
+                host = new(bookFUSE = new(path)) { Prefix = volumePrefix };
+                if (host.Mount(mountPoint, null, true, debugFlags) > 0)
+                {
+                    throw new CommandLineUsageException("cannot mount file system");
+                }
+                mountPoint = host.MountPoint();
+                _Host = host;
+                Log(EVENTLOG_INFORMATION_TYPE, string.Format("{0}{1}{2} -p {3} -m {4}",
+                    PROGNAME,
+                    (volumePrefix?.Length ?? 0) > 0 ? " -u " : "",
+                    volumePrefix ?? "",
+                    path,
+                    mountPoint));
+            }
+            catch (CommandLineUsageException ex)
+            {
+                Log(EVENTLOG_ERROR_TYPE, string.Format(
+                    "{0}" +
+                    "usage: {1} OPTIONS\n" +
+                    "\n" +
+                    "options:\n" +
+                    "    -d DebugFlags       [-1: enable all debug logs]\n" +
+                    "    -D DebugLogFile     [file path; use - for stderr]\n" +
+                    "    -u \\Server\\Share    [UNC prefix (single backslash)]\n" +
+                    "    -p Path             [path to directory to expose]\n" +
+                    "    -m MountPoint       [X:|*|directory]\n",
+                    ex.HasMessage ? ex.Message + "\n" : "",
+                    PROGNAME));
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Log(EVENTLOG_ERROR_TYPE, string.Format("{0}", ex.Message));
+                throw;
+            }
+        }
+
+        protected override void OnStop()
+        {
+            _Host?.Unmount();
+            _Host = null;
+        }
+
+        /// <summary>
+        /// Convert an argument to a string
+        /// </summary>
+        /// <param name="Args">The args array</param>
+        /// <param name="I">The index into the args array</param>
+        /// <param name="V">The value of the arg</param>
+        /// <exception cref="CommandLineUsageException"></exception>
+        private static void ArgToString(string[] Args, ref int I, ref string? V)
+        {
+            if (Args.Length > ++I)
+                V = Args[I];
+            else
+                throw new CommandLineUsageException();
+        }
+        /// <summary>
+        /// Convert an argument to an int
+        /// </summary>
+        /// <param name="Args">The args array</param>
+        /// <param name="I">The index into the args array</param>
+        /// <param name="V">The value of the arg</param>
+        /// <exception cref="CommandLineUsageException"></exception>
+        private static void ArgToInt(string[] Args, ref int I, ref uint V)
+        {
+            if (Args.Length > ++I)
+                V = int.TryParse(Args[I], out int R) ? (uint)R : V;
+            else
+                throw new CommandLineUsageException();
+        }
+
+        /// <summary>
+        /// The file system host instance used to mount the BookFUSE file system.
+        /// </summary>
+        private FileSystemHost? _Host;
+    }
+
+    /// <summary>
+    /// Represents the entry point of the application.
+    /// </summary>
+    /// <remarks>This class initializes and executes the main application logic by invoking the <see
+    /// cref="BookFUSEService"/>. The application's exit code is set based on the result of the service's
+    /// execution.</remarks>
+    internal class Program
+    {
+        /// <summary>
+        /// The entry point of the application.
+        /// </summary>
+        /// <remarks>Initializes and runs the BookFUSE service, setting the application's exit code based
+        /// on the service's execution result.</remarks>
+        static void Main()
+        {
+            Environment.ExitCode = new BookFUSEService().Run();
+        }
+    }
+}
