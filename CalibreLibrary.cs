@@ -79,11 +79,16 @@ namespace BookFUSE
                     }
                     if (!value.Books.Any(book => (book.Title == title) && (book.Format == format)))
                     {
+                        FileStream stream = new($"{_Path}\\{path}\\{fileName}.{format}",
+                            FileMode.Open,
+                            FileAccess.Read,
+                            FileShare.ReadWrite);
                         value.Books.Add(new Book(
                             title, author,
                             seriesName, seriesIndex > 10000 ? "SP" + (seriesIndex % 10000).ToString().PadLeft(2, '0') : seriesIndex.ToString().PadLeft(2, '0'),
                             fileName, format, path,
-                            timestamp, lastModified));
+                            stream.Length, timestamp, lastModified));
+                        stream.Dispose();
                     }
                 }
             }
@@ -185,13 +190,14 @@ namespace BookFUSE
         /// <param name="FileName">The file name.</param>
         /// <param name="Format">The file format.</param>
         /// <param name="Path">The path of the folder containing the book.</param>
+        /// <param name="FileSize">The file size in bytes.</param>
         /// <param name="Created">The file creation date.</param>
         /// <param name="Modified">The file modified date.</param>
         public sealed record Book(
             string Title, string Author,
             string SeriesName, string SeriesIndex,
             string FileName, string Format, string Path,
-            DateTime Created, DateTime Modified)
+            long FileSize, DateTime Created, DateTime Modified)
         {
             /// <summary>
             /// Gets the physical file name including its extension.

@@ -200,12 +200,23 @@ namespace BookFUSE
             }
 
             LibraryFileDesc libraryFile = (LibraryFileDesc)FileDesc;
-            if (libraryFile.Stream is null || (ulong)libraryFile.Stream.Length <= Offset)
+            if (libraryFile.Book is null)
+            {
+                BytesTransferred = 0;
+                return STATUS_NOT_FOUND;
+            }
+
+            libraryFile.Stream ??= new($"{_Path}\\{libraryFile.Book.Path}\\{libraryFile.Book.PhysicalName}",
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite);
+            if ((ulong)libraryFile.Stream.Length <= Offset)
             {
                 ThrowIoExceptionWithNtStatus(STATUS_END_OF_FILE);
             }
+
             byte[] bytes = new byte[Length];
-            libraryFile.Stream!.Seek((long)Offset, SeekOrigin.Begin);
+            libraryFile.Stream.Seek((long)Offset, SeekOrigin.Begin);
             BytesTransferred = (uint)libraryFile.Stream.Read(bytes, 0, bytes.Length);
             Marshal.Copy(bytes, 0, Buffer, bytes.Length);
             return STATUS_SUCCESS;

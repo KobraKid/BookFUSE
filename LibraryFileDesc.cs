@@ -48,17 +48,7 @@ namespace BookFUSE
         /// </summary>
         /// <param name="path">The root file path</param>
         /// <param name="book">The book.</param>
-        public LibraryFileDesc(string path, CalibreLibrary.Book book)
-        {
-            _Path = path;
-            Book = book;
-            Stream = new FileStream($"{_Path}\\{book.Path}\\{book.PhysicalName}",
-                FileMode.Open,
-                FileAccess.ReadWrite,
-                FileShare.Read | FileShare.Write | FileShare.Delete,
-                4096,
-                FileOptions.None);
-        }
+        public LibraryFileDesc(string path, CalibreLibrary.Book book) { _Path = path; Book = book; }
 
         /// <summary>
         /// Gets the file or directory information.
@@ -89,7 +79,7 @@ namespace BookFUSE
             {
                 FileAttributes = (uint)attributes,
                 ReparseTag = 0,
-                FileSize = (ulong)(Stream?.Length ?? 0),
+                FileSize = (ulong)(Book is null ? 0 : Book.FileSize),
                 AllocationSize = 0,
                 CreationTime = (ulong)(Book is null ? DateTime.Today : Book.Created).ToFileTimeUtc(),
                 ChangeTime = (ulong)(Book is null ? DateTime.Today : Book.Modified).ToFileTimeUtc(),
