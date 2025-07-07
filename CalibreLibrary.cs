@@ -80,7 +80,8 @@ namespace BookFUSE
                     if (!value.Books.Any(book => (book.Title == title) && (book.Format == format)))
                     {
                         value.Books.Add(new Book(
-                            title, author, seriesIndex,
+                            title, author,
+                            seriesName, seriesIndex > 10000 ? "SP" + (seriesIndex % 10000).ToString().PadLeft(2, '0') : seriesIndex.ToString().PadLeft(2, '0'),
                             fileName, format, path,
                             timestamp, lastModified));
                     }
@@ -149,8 +150,8 @@ namespace BookFUSE
             string seriesName = fileName[..fileName.LastIndexOf('\\')];
             if (string.IsNullOrEmpty(seriesName)) return false;
             if (!IsSeries(seriesName)) return false;
-            string bookName = fileName[(fileName.LastIndexOf('\\') + 1)..fileName.LastIndexOf('.')];
-            return GetSeries(seriesName).Books.Any(book => book.Title == bookName);
+            string index = fileName[(fileName.LastIndexOf(" - ") + 3)..fileName.LastIndexOf('.')];
+            return GetSeries(seriesName).Books.Any(book => book.SeriesIndex == index);
         }
 
         /// <summary>
@@ -162,8 +163,8 @@ namespace BookFUSE
         public Book GetBook(string fileName)
         {
             string seriesName = fileName[..fileName.LastIndexOf('\\')];
-            string bookName = fileName[(fileName.LastIndexOf('\\') + 1)..fileName.LastIndexOf('.')];
-            return GetSeries(seriesName).Books.FirstOrDefault(b => b.Title == bookName)
+            string index = fileName[(fileName.LastIndexOf(" - ") + 3)..fileName.LastIndexOf('.')];
+            return GetSeries(seriesName).Books.FirstOrDefault(b => b.SeriesIndex == index)
                    ?? throw new KeyNotFoundException($"Book not found for file: {fileName}");
         }
 
@@ -179,6 +180,7 @@ namespace BookFUSE
         /// </summary>
         /// <param name="Title">The book's title.</param>
         /// <param name="Author">The book's author.</param>
+        /// <param name="SeriesName"> The name of the series the book belongs to.</param>
         /// <param name="SeriesIndex">The book's order in the series.</param>
         /// <param name="FileName">The file name.</param>
         /// <param name="Format">The file format.</param>
@@ -186,12 +188,20 @@ namespace BookFUSE
         /// <param name="Created">The file creation date.</param>
         /// <param name="Modified">The file modified date.</param>
         public sealed record Book(
-            string Title, string Author, double SeriesIndex,
+            string Title, string Author,
+            string SeriesName, string SeriesIndex,
             string FileName, string Format, string Path,
             DateTime Created, DateTime Modified)
         {
-            public string FileNameWithExtension => $"{FileName}.{Format}";
-            public string TitleWithExtension => $"{Title}.{Format}";
+            /// <summary>
+            /// Gets the physical file name including its extension.
+            /// </summary>
+            public string PhysicalName => $"{FileName}.{Format}";
+
+            /// <summary>
+            /// Gets the virtual file name, including its index and extension.
+            /// </summary>
+            public string VirtualName => $"{SeriesName} - {SeriesIndex}.{Format}";
         };
     }
 }

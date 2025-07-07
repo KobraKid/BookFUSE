@@ -52,6 +52,30 @@ namespace BookFUSE
         }
 
         /// <summary>
+        /// Handles changes to the library by responding to file system events.
+        /// </summary>
+        /// <remarks>This method is triggered when a file system change is detected. It ensures that the
+        /// library is re-initialized after a short delay to handle potential bursts of file system events.</remarks>
+        /// <param name="sender">The source of the event, typically the file system watcher.</param>
+        /// <param name="e">The event data containing information about the file system change.</param>
+        public void LibraryChanged(object sender, FileSystemEventArgs e)
+        {
+            lock (_lock)
+            {
+                _timer?.Dispose();
+                _timer = new Timer(_ =>
+                {
+                    lock (_lock)
+                    {
+                        _timer?.Dispose();
+                        _timer = null;
+                    }
+                    _Library.Init();
+                }, null, 500, Timeout.Infinite);
+            }
+        }
+
+        /// <summary>
         /// Add the base library path to a file name.
         /// </summary>
         /// <param name="fileName">The file name.</param>
@@ -237,14 +261,14 @@ namespace BookFUSE
             {
                 Series series = libraryFile.Series;
                 Book[] books = [.. series.Books];
-                Array.Sort(books, (b1, b2) => string.Compare(b1.Title, b2.Title));
+                Array.Sort(books, (b1, b2) => string.Compare(b1.VirtualName, b2.VirtualName));
                 int index;
                 if (Context is null)
                 {
                     index = 0;
                     if (Marker != null)
                     {
-                        index = Array.BinarySearch([.. books.Select(book => book.Title)], Marker);
+                        index = Array.BinarySearch([.. books.Select(book => book.VirtualName)], Marker);
                         if (index >= 0)
                         {
                             index++;
@@ -262,7 +286,7 @@ namespace BookFUSE
                 if (books.Length > index)
                 {
                     Context = index + 1;
-                    FileName = books[index].TitleWithExtension;
+                    FileName = books[index].VirtualName;
                     LibraryFileDesc bookFileDesc = new(_Path, books[index]);
                     bookFileDesc.GetFileInfo(out FileInfo);
                     return true;
@@ -296,6 +320,14 @@ namespace BookFUSE
         /// The size of the allocation unit for the file system.
         /// </summary>
         protected const int ALLOCATION_UNIT = 4096;
+        /// <summary>
+        /// A timer used to delay the re-initialization of the library after file system changes.
+        /// </summary>
+        private Timer? _timer;
+        /// <summary>
+        /// A lock object to synchronize access to the timer and library re-initialization.
+        /// </summary>
+        private readonly object _lock = new();
     }
 
     /// <summary>
@@ -412,7 +444,8 @@ namespace BookFUSE
                 }
 
                 /* Mount the file system */
-                host = new(bookFUSE = new(path)) { Prefix = volumePrefix };
+                bookFUSE = new(path);
+                host = new(bookFUSE) { Prefix = volumePrefix };
                 if (host.Mount(mountPoint, null, true, debugFlags) > 0)
                 {
                     throw new CommandLineUsageException("cannot mount file system");
@@ -425,6 +458,16 @@ namespace BookFUSE
                     volumePrefix ?? "",
                     path,
                     mountPoint));
+
+                /* Set up file system watcher */
+                _Watcher = new(path)
+                {
+                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
+                    Filter = "metadata.db",
+                    IncludeSubdirectories = true,
+                    EnableRaisingEvents = true
+                };
+                _Watcher.Changed += bookFUSE.LibraryChanged;
             }
             catch (CommandLineUsageException ex)
             {
@@ -449,6 +492,11 @@ namespace BookFUSE
             }
         }
 
+        /// <summary>
+        /// Executes cleanup logic when the service is stopped.
+        /// </summary>
+        /// <remarks>This method is called by the service framework when the service is being stopped.  It
+        /// ensures that any resources associated with the service, such as the host, are properly released.</remarks>
         protected override void OnStop()
         {
             _Host?.Unmount();
@@ -488,6 +536,11 @@ namespace BookFUSE
         /// The file system host instance used to mount the BookFUSE file system.
         /// </summary>
         private FileSystemHost? _Host;
+
+        /// <summary>
+        /// The file system watcher instance that monitors changes in the Calibre library directory.
+        /// </summary>
+        private FileSystemWatcher? _Watcher;
     }
 
     /// <summary>

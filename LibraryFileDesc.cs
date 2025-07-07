@@ -1,5 +1,4 @@
-﻿using System.Runtime;
-using System.Runtime.Versioning;
+﻿using System.Runtime.Versioning;
 using FileInfo = Fsp.Interop.FileInfo;
 
 namespace BookFUSE
@@ -53,7 +52,7 @@ namespace BookFUSE
         {
             _Path = path;
             Book = book;
-            Stream = new FileStream($"{_Path}\\{book.Path}\\{book.FileNameWithExtension}",
+            Stream = new FileStream($"{_Path}\\{book.Path}\\{book.PhysicalName}",
                 FileMode.Open,
                 FileAccess.ReadWrite,
                 FileShare.Read | FileShare.Write | FileShare.Delete,
