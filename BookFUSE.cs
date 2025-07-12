@@ -1,5 +1,4 @@
 ﻿using Fsp;
-using System.Collections;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using static BookFUSE.CalibreLibrary;
@@ -20,22 +19,6 @@ namespace BookFUSE
             => ThrowIoExceptionWithHResult(unchecked((int)(0x80070000 | error)));
         protected static void ThrowIoExceptionWithNtStatus(int status)
             => ThrowIoExceptionWithWin32((int)Win32FromNtStatus(status));
-
-        /// <summary>
-        /// Compare series by their names.
-        /// </summary>
-        private class SeriesComparer : IComparer
-        {
-            public int Compare(object? x, object? y)
-            {
-                string xName = (x is null) ? string.Empty :
-                    (x.GetType() == typeof(KeyValuePair<int, Series>) ? ((KeyValuePair<int, Series>)x).Value.Name : ((KeyValuePair<int, string>)x).Value);
-                string yName = (y is null) ? string.Empty :
-                    (y.GetType() == typeof(KeyValuePair<int, Series>) ? ((KeyValuePair<int, Series>)y).Value.Name : ((KeyValuePair<int, string>)y).Value);
-                return string.Compare(xName, yName);
-            }
-        }
-        private static readonly SeriesComparer _seriesComparer = new();
 
         /// <summary>
         /// Create a new BookFUSE file system instance.
@@ -117,7 +100,7 @@ namespace BookFUSE
         {
             VolumeInfo = new()
             {
-                TotalSize = 65536,
+                TotalSize = (ulong)_Library.VolumeSize,
                 FreeSize = 0
             };
             VolumeInfo.SetVolumeLabel(_VolumeLabel);
@@ -126,17 +109,23 @@ namespace BookFUSE
 
         public override int GetSecurityByName(string FileName, out uint FileAttributes, ref byte[] SecurityDescriptor)
         {
-            FileAttributes attributes = System.IO.FileAttributes.ReadOnly;
+            FileAttributes attributes = System.IO.FileAttributes.ReadOnly | System.IO.FileAttributes.Directory;
             if (FileName == "\\")
             {
                 System.IO.FileInfo info = new(ConcatPath(FileName));
                 attributes |= info.Attributes;
             }
-            else if (_Library.IsSeries(FileName))
+            else if (_Library.GetLibrary(FileName, out Library? library))
             {
-                attributes |= System.IO.FileAttributes.Directory;
+                if (library.GetSeries(FileName, out Series? series))
+                {
+                    if (series.GetBook(FileName, out Book? _))
+                    {
+                        // Remove directory attribute for books
+                        attributes &= ~System.IO.FileAttributes.Directory;
+                    }
+                }
             }
-            else { } // No additional attributes for books
             FileAttributes = (uint)attributes;
             return STATUS_SUCCESS;
         }
@@ -156,32 +145,41 @@ namespace BookFUSE
                 return STATUS_SUCCESS;
             }
 
-            if (_Library.IsSeries(FileName))
+            if (_Library.GetLibrary(FileName, out Library? library))
             {
-                Series series = _Library.GetSeries(FileName);
-                LibraryFileDesc libraryFile = new(_Path, series);
-                libraryFile.GetFileInfo(out FileInfo);
-                FileNode = series;
-                FileDesc = libraryFile;
-                return STATUS_SUCCESS;
+                if (library.GetSeries(FileName, out Series? series))
+                {
+                    if (series.GetBook(FileName, out Book? book))
+                    {
+                        LibraryFileDesc libraryFile = new(_Path, library, series, book);
+                        libraryFile.GetFileInfo(out FileInfo);
+                        FileNode = book;
+                        FileDesc = libraryFile;
+                    }
+                    else // FileName is a series
+                    {
+                        LibraryFileDesc libraryFile = new(_Path, library, series);
+                        libraryFile.GetFileInfo(out FileInfo);
+                        FileNode = series;
+                        FileDesc = libraryFile;
+                    }
+                }
+                else // FileName is a library
+                {
+                    LibraryFileDesc libraryFile = new(_Path, library);
+                    libraryFile.GetFileInfo(out FileInfo);
+                    FileNode = library;
+                    FileDesc = libraryFile;
+                }
             }
-            else if (_Library.IsBook(FileName))
-            {
-                Book book = _Library.GetBook(FileName);
-                LibraryFileDesc libraryFile = new(_Path, book);
-                libraryFile.GetFileInfo(out FileInfo);
-                FileNode = book;
-                FileDesc = libraryFile;
-                return STATUS_SUCCESS;
-            }
-            else // Filename is the directory root
+            else // FileName is the directory root
             {
                 LibraryFileDesc libraryFile = new(ConcatPath(FileName));
                 libraryFile.GetFileInfo(out FileInfo);
                 FileNode = default;
                 FileDesc = libraryFile;
-                return STATUS_SUCCESS;
             }
+            return STATUS_SUCCESS;
         }
 
         public override void Close(object FileNode, object FileDesc)
@@ -200,13 +198,13 @@ namespace BookFUSE
             }
 
             LibraryFileDesc libraryFile = (LibraryFileDesc)FileDesc;
-            if (libraryFile.Book is null)
+            if (libraryFile.Book is null || libraryFile.Library is null)
             {
                 BytesTransferred = 0;
                 return STATUS_NOT_FOUND;
             }
 
-            libraryFile.Stream ??= new($"{_Path}\\{libraryFile.Book.Path}\\{libraryFile.Book.PhysicalName}",
+            libraryFile.Stream ??= new($"{_Path}\\{libraryFile.Library.Name}\\{libraryFile.Book.Path}\\{libraryFile.Book.PhysicalName}",
                     FileMode.Open,
                     FileAccess.Read,
                     FileShare.ReadWrite);
@@ -237,15 +235,79 @@ namespace BookFUSE
         public override bool ReadDirectoryEntry(object FileNode, object FileDesc, string Pattern, string Marker, ref object Context, out string? FileName, out FileInfo FileInfo)
         {
             LibraryFileDesc libraryFile = (LibraryFileDesc)FileDesc;
+            Pattern = Pattern?.Replace('<', '*').Replace('>', '?').Replace('"', '.') ?? string.Empty;
+            int index = 0;
+            // Parse the root directory
             if (libraryFile.Root != null)
             {
-                int index;
+                // Parse a library folder
+                if (libraryFile.Library != null)
+                {
+                    // Parse a series folder
+                    if (libraryFile.Series != null)
+                    {
+                        var books = libraryFile.Series.Books.Where(book => book.VirtualName.Contains(Pattern, StringComparison.OrdinalIgnoreCase)).ToArray();
+                        if (Context is null)
+                        {
+                            if (Marker != null)
+                            {
+                                index = Array.BinarySearch([.. books.Select(b => b.VirtualName)], Marker);
+                                if (index >= 0) { index++; }
+                                else { index = ~index; }
+                            }
+                        }
+                        else
+                        {
+                            index = (int)Context;
+                        }
+                        if (index < books.Length)
+                        {
+                            Context = index + 1;
+                            FileName = books[index].VirtualName;
+                            new LibraryFileDesc(_Path, libraryFile.Library, libraryFile.Series, books[index]).GetFileInfo(out FileInfo);
+                            return true;
+                        }
+                        else
+                        {
+                            FileName = default;
+                            FileInfo = default;
+                            return false;
+                        }
+                    }
+                    var series = libraryFile.Library.SeriesList.Where(series => series.Name.Contains(Pattern, StringComparison.OrdinalIgnoreCase)).ToArray();
+                    if (Context is null)
+                    {
+                        if (Marker != null)
+                        {
+                            index = Array.BinarySearch([.. series.Select(s => s.Name)], Marker);
+                            if (index >= 0) { index++; }
+                            else { index = ~index; }
+                        }
+                    }
+                    else
+                    {
+                        index = (int)Context;
+                    }
+                    if (index < series.Length)
+                    {
+                        Context = index + 1;
+                        FileName = series[index].Name;
+                        new LibraryFileDesc(_Path, libraryFile.Library, series[index]).GetFileInfo(out FileInfo);
+                        return true;
+                    }
+                    else
+                    {
+                        FileName = default;
+                        FileInfo = default;
+                        return false;
+                    }
+                }
+                var libraries = _Library.Libraries.Where(lib => lib.Name.Contains(Pattern, StringComparison.OrdinalIgnoreCase)).ToArray();
                 if (Context is null)
                 {
-                    index = 0;
                     if (Marker != null)
                     {
-                        index = Array.BinarySearch(_Library.SortedSeries, KeyValuePair.Create(0, Marker), _seriesComparer);
+                        index = Array.BinarySearch([.. libraries.Select(l => l.Name)], Marker);
                         if (index >= 0) { index++; }
                         else { index = ~index; }
                     }
@@ -254,11 +316,11 @@ namespace BookFUSE
                 {
                     index = (int)Context;
                 }
-                if (_Library.SortedSeries.Length > index)
+                if (index < libraries.Length)
                 {
                     Context = index + 1;
-                    FileName = _Library.SortedSeries[index].Value.Name;
-                    new LibraryFileDesc(_Path, _Library.SortedSeries[index].Value).GetFileInfo(out FileInfo);
+                    FileName = libraries[index].Name;
+                    new LibraryFileDesc(_Path, libraries[index]).GetFileInfo(out FileInfo);
                     return true;
                 }
                 else
@@ -268,51 +330,7 @@ namespace BookFUSE
                     return false;
                 }
             }
-            else if (libraryFile.Series != null)
-            {
-                Series series = libraryFile.Series;
-                Book[] books = [.. series.Books];
-                Array.Sort(books, (b1, b2) => string.Compare(b1.VirtualName, b2.VirtualName));
-                int index;
-                if (Context is null)
-                {
-                    index = 0;
-                    if (Marker != null)
-                    {
-                        index = Array.BinarySearch([.. books.Select(book => book.VirtualName)], Marker);
-                        if (index >= 0)
-                        {
-                            index++;
-                        }
-                        else
-                        {
-                            index = ~index;
-                        }
-                    }
-                }
-                else
-                {
-                    index = (int)Context;
-                }
-                if (books.Length > index)
-                {
-                    Context = index + 1;
-                    FileName = books[index].VirtualName;
-                    LibraryFileDesc bookFileDesc = new(_Path, books[index]);
-                    bookFileDesc.GetFileInfo(out FileInfo);
-                    return true;
-                }
-                else
-                {
-                    FileName = default;
-                    FileInfo = default;
-                    return false;
-                }
-            }
-            else
-            {
-                throw new DirectoryNotFoundException(libraryFile.ToString());
-            }
+            throw new DirectoryNotFoundException(libraryFile.ToString());
         }
 
         /// <summary>
@@ -490,7 +508,7 @@ namespace BookFUSE
                     "    -d DebugFlags       [-1: enable all debug logs]\n" +
                     "    -D DebugLogFile     [file path; use - for stderr]\n" +
                     "    -u \\Server\\Share    [UNC prefix (single backslash)]\n" +
-                    "    -p Path             [path to directory to expose]\n" +
+                    "    -p Path             [path to Calibre directory]\n" +
                     "    -m MountPoint       [X:|*|directory]\n",
                     ex.HasMessage ? ex.Message + "\n" : "",
                     PROGNAME));
