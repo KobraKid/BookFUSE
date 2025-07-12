@@ -1,4 +1,5 @@
 ﻿using System.Data.SQLite;
+using System.Diagnostics.CodeAnalysis;
 
 namespace BookFUSE
 {
@@ -6,37 +7,44 @@ namespace BookFUSE
     {
         private readonly string _Path = path;
 
-        private readonly SQLiteConnection sqlite = new($"Data Source={path}\\metadata.db;New=False;");
+        private SQLiteConnection? sqlite;
 
         /// <summary>
-        /// Series list indexed by series ID.
+        /// Gets the collection of libraries associated with the application.
         /// </summary>
-        public Dictionary<int, Series> SeriesList { get => _SeriesList; }
+        public List<Library> Libraries { get; } = [];
 
-        private readonly Dictionary<int, Series> _SeriesList = [];
-
-        /// <summary>
-        /// Series sorted by name for quick access.
-        /// </summary>
-        public KeyValuePair<int, Series>[] SortedSeries { get => _SortedSeries; }
-
-        private KeyValuePair<int, Series>[] _SortedSeries = [];
+        public long VolumeSize = 0;
 
         /// <summary>
         /// Initialize the Calibre library by loading series information from the database.
         /// </summary>
         public void Init()
         {
-            SeriesList.Clear();
-            _SortedSeries = [];
-            LoadSeriesInfo();
+            Libraries.Clear();
+            foreach (var dir in Directory.GetDirectories(_Path))
+            {
+                var metadataPath = Path.Combine(dir, "metadata.db");
+                if (File.Exists(metadataPath))
+                {
+                    var libraryName = Path.GetFileName(dir);
+                    LoadLibraryInfo(libraryName);
+                }
+            }
+            static long bookSizeSelector(Book b) => b.FileSize;
+            static long seriesSizeSelector(Series s) => s.Books.Sum(bookSizeSelector);
+            static long librariesSizeSelector(Library l) => l.SeriesList.Sum(seriesSizeSelector);
+            VolumeSize = Libraries.Sum(librariesSizeSelector);
         }
 
         /// <summary>
         /// Load the series information from the Calibre database.
         /// </summary>
-        public void LoadSeriesInfo()
+        /// <param name="libraryName">The name of the library.</param>
+        public void LoadLibraryInfo(string libraryName)
         {
+            Dictionary<int, Series> seriesList = [];
+            sqlite = new($"Data Source={_Path}\\{libraryName}\\metadata.db;New=False;");
             sqlite.Open();
             var command = sqlite.CreateCommand();
             command.CommandText =
@@ -70,20 +78,20 @@ namespace BookFUSE
                     DateTime lastModified = reader.GetDateTime(col++);
                     string fileName = reader.GetString(col++);
                     string format = FormatToFileExtension(reader.GetString(col++));
-                    string seriesName = reader.GetString(col++);
+                    string seriesName = reader.GetString(col++).Replace(':', '_');
                     int seriesId = reader.GetInt32(col++);
-                    if (!SeriesList.TryGetValue(seriesId, out Series? value))
+                    if (!seriesList.TryGetValue(seriesId, out Series? series))
                     {
-                        value = new(seriesName, []);
-                        SeriesList[seriesId] = value;
+                        series = new(seriesName, []);
+                        seriesList[seriesId] = series;
                     }
-                    if (!value.Books.Any(book => (book.Title == title) && (book.Format == format)))
+                    if (!series.Books.Any(book => (book.Title == title) && (book.Format == format)))
                     {
-                        FileStream stream = new($"{_Path}\\{path}\\{fileName}.{format}",
+                        FileStream stream = new($"{_Path}\\{libraryName}\\{path}\\{fileName}.{format}",
                             FileMode.Open,
                             FileAccess.Read,
                             FileShare.ReadWrite);
-                        value.Books.Add(new Book(
+                        series.Books.Add(new Book(
                             title, author,
                             seriesName, seriesIndex > 10000 ? "SP" + (seriesIndex % 10000).ToString().PadLeft(2, '0') : seriesIndex.ToString().PadLeft(2, '0'),
                             fileName, format, path,
@@ -93,7 +101,12 @@ namespace BookFUSE
                 }
             }
             sqlite.Close();
-            _SortedSeries = [.. SeriesList.ToArray().OrderBy(kvp => kvp.Value.Name)];
+            sqlite.Dispose();
+            foreach (var kvp in seriesList)
+            {
+                kvp.Value.Books.Sort((a, b) => string.Compare(a.VirtualName, b.VirtualName, StringComparison.Ordinal));
+            }
+            Libraries.Add(new(libraryName, [.. seriesList.Values.OrderBy(series => series.Name)]));
         }
 
         /// <summary>
@@ -118,59 +131,41 @@ namespace BookFUSE
         }
 
         /// <summary>
-        /// Check if the given file name is a series.
+        /// Attempts to retrieve a library that matches the specified file name.
         /// </summary>
-        /// <param name="fileName">The file name.</param>
-        /// <returns>Whether a series was found for the given filename.</returns>
-        public bool IsSeries(string fileName)
+        /// <remarks>A library is considered a match if the file name starts with the library's name
+        /// followed by a backslash ('\').</remarks>
+        /// <param name="fileName">The file name to search for. Must not be null or empty.</param>
+        /// <param name="library">When the method returns <see langword="true"/>, contains the library that matches the specified file name.
+        /// When the method returns <see langword="false"/>, contains <see langword="null"/>.</param>
+        /// <returns><see langword="true"/> if a matching library is found; otherwise, <see langword="false"/>.</returns>
+        public bool GetLibrary(string fileName, [NotNullWhen(true)] out Library? library)
         {
-            if (!fileName.Contains('\\')) return false;
-            string seriesName = fileName[(fileName.IndexOf('\\') + 1)..];
-            return SeriesList.Values.Any(series => series.Name == seriesName);
+            if (fileName.Split('\\').Length < 2) { library = null; return false; } // library must be one level deep
+            library = Libraries.FirstOrDefault(lib => fileName.StartsWith("\\" + lib.Name));
+            return library != null;
         }
 
         /// <summary>
-        /// Get the series for the given file name.
+        /// Represents a Calibre library containing series and books.
         /// </summary>
-        /// <param name="fileName">The file name.</param>
-        /// <returns>The corresponding series.</returns>
-        /// <exception cref="KeyNotFoundException">No series was found for the given filename.</exception>
-        public Series GetSeries(string fileName)
+        /// <param name="Name">The library folder name.</param>
+        /// <param name="SeriesList">The list of series in the library, sorted by series name</param>
+        public sealed record Library(string Name, List<Series> SeriesList)
         {
-            string seriesName = fileName[(fileName.IndexOf('\\') + 1)..];
-            return SeriesList.Values.FirstOrDefault(series => series.Name == seriesName)
-                   ?? throw new KeyNotFoundException($"Series not found for file: {fileName}");
-        }
-
-        /// <summary>
-        /// Check if the given file name is a book in a series.
-        /// </summary>
-        /// <remarks>The file name must start with \ and consist of a folder,
-        /// another \ character, and finally a file name with extension.</remarks>
-        /// <param name="fileName">The file name.</param>
-        /// <returns>Whether a book was found for the given filename.</returns>
-        public bool IsBook(string fileName)
-        {
-            if (!fileName.Contains('\\')) return false;
-            string seriesName = fileName[..fileName.LastIndexOf('\\')];
-            if (string.IsNullOrEmpty(seriesName)) return false;
-            if (!IsSeries(seriesName)) return false;
-            string index = fileName[(fileName.LastIndexOf(" - ") + 3)..fileName.LastIndexOf('.')];
-            return GetSeries(seriesName).Books.Any(book => book.SeriesIndex == index);
-        }
-
-        /// <summary>
-        /// Get the book for the given file name.
-        /// </summary>
-        /// <param name="fileName">The file name.</param>
-        /// <returns>The corresponding book.</returns>
-        /// <exception cref="KeyNotFoundException">No book was found for the given filename.</exception>
-        public Book GetBook(string fileName)
-        {
-            string seriesName = fileName[..fileName.LastIndexOf('\\')];
-            string index = fileName[(fileName.LastIndexOf(" - ") + 3)..fileName.LastIndexOf('.')];
-            return GetSeries(seriesName).Books.FirstOrDefault(b => b.SeriesIndex == index)
-                   ?? throw new KeyNotFoundException($"Book not found for file: {fileName}");
+            /// <summary>
+            /// Get the series for the given file name.
+            /// </summary>
+            /// <param name="fileName">The file name.</param>
+            /// <returns>The corresponding series.</returns>
+            /// <exception cref="KeyNotFoundException">No series was found for the given filename.</exception>
+            public bool GetSeries(string fileName, [NotNullWhen(true)] out Series? series)
+            {
+                if (fileName.Split('\\').Length < 3) { series = null; return false; } // series must be two levels deep
+                string seriesName = fileName.Split('\\')[2];
+                series = SeriesList.FirstOrDefault(series => seriesName == series.Name);
+                return series != null;
+            }
         }
 
         /// <summary>
@@ -178,7 +173,21 @@ namespace BookFUSE
         /// </summary>
         /// <param name="Name">The series name.</param>
         /// <param name="Books">The list of books in the series.</param>
-        public sealed record Series(string Name, List<Book> Books);
+        public sealed record Series(string Name, List<Book> Books)
+        {
+            /// <summary>
+            /// Get the book for the given file name.
+            /// </summary>
+            /// <param name="fileName">The file name.</param>
+            /// <returns>The corresponding book.</returns>
+            /// <exception cref="KeyNotFoundException">No book was found for the given filename.</exception>
+            public bool GetBook(string fileName, [NotNullWhen(true)] out Book? book)
+            {
+                if (fileName.Split('\\').Length < 4) { book = null; return false; } // book must be three levels deep
+                book = Books.FirstOrDefault(b => fileName.EndsWith("\\" + b.VirtualName));
+                return book != null;
+            }
+        }
 
         /// <summary>
         /// Represents a book in the Calibre library.
