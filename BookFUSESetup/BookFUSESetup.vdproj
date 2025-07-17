@@ -165,7 +165,7 @@
         "Name" = "8:Microsoft Visual Studio"
         "ProductName" = "8:BookFUSE"
         "ProductCode" = "8:{B95B52B1-D1CE-4B91-A509-213F9248588A}"
-        "PackageCode" = "8:{1F76224E-9C25-470A-A445-6D33416FC2F5}"
+        "PackageCode" = "8:{F122FE22-EC83-490B-B5C4-85B1340D7D00}"
         "UpgradeCode" = "8:{D31EC9B8-9D47-436F-90CC-DE3CFA5381B3}"
         "AspNetVersion" = "8:2.0.50727.0"
         "RestartWWWService" = "11:FALSE"
@@ -273,7 +273,7 @@
                                                             "Condition" = "8:"
                                                             "Transitive" = "11:FALSE"
                                                             "ValueTypes" = "3:1"
-                                                            "Value" = "8:-u %1 -m %2 -p [EDITA1]"
+                                                            "Value" = "8:-u %1 -m %2 -p \"[EDITA1]\""
                                                             }
                                                             "{ADCFDA98-8FDD-45E4-90BC-E3D20B029870}:_6B6037033ACC44C5A64AAF5BEF663733"
                                                             {
@@ -1030,7 +1030,7 @@
         {
             "{5259A561-127C-4D43-A0A1-72F10C7B3BF8}:_727FEF69D0404A549AB344E5EBCEAAFD"
             {
-            "SourcePath" = "8:..\\BookFUSE\\obj\\Debug\\net8.0\\apphost.exe"
+            "SourcePath" = "8:..\\BookFUSE\\obj\\Debug\\net8.0-windows\\apphost.exe"
             "TargetName" = "8:"
             "Tag" = "8:"
             "Folder" = "8:_ABF933FF6CC94B6599A7E374DB4EB1F4"
