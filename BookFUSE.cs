@@ -66,6 +66,7 @@ namespace BookFUSE
         public string ConcatPath(string fileName)
             => _Path + fileName;
 
+        /// <inheritdoc />
         public override int ExceptionHandler(Exception ex)
         {
             int HResult = ex.HResult;
@@ -76,10 +77,12 @@ namespace BookFUSE
             return STATUS_UNEXPECTED_IO_ERROR;
         }
 
+        /// <inheritdoc />
         public override int Init(object HostObject)
         {
             _Library.Init();
             FileSystemHost host = (FileSystemHost)HostObject;
+            host.FileSystemName = PROGNAME;
             host.SectorSize = ALLOCATION_UNIT;
             host.SectorsPerAllocationUnit = 1;
             host.MaxComponentLength = 255;
@@ -96,6 +99,7 @@ namespace BookFUSE
             return STATUS_SUCCESS;
         }
 
+        /// <inheritdoc />
         public override int GetVolumeInfo(out VolumeInfo VolumeInfo)
         {
             VolumeInfo = new()
@@ -103,10 +107,11 @@ namespace BookFUSE
                 TotalSize = (ulong)_Library.VolumeSize,
                 FreeSize = 0
             };
-            VolumeInfo.SetVolumeLabel(_VolumeLabel);
+            VolumeInfo.SetVolumeLabel(PROGNAME);
             return STATUS_SUCCESS;
         }
 
+        /// <inheritdoc />
         public override int GetSecurityByName(string FileName, out uint FileAttributes, ref byte[] SecurityDescriptor)
         {
             FileAttributes attributes = System.IO.FileAttributes.ReadOnly | System.IO.FileAttributes.Directory;
@@ -130,6 +135,7 @@ namespace BookFUSE
             return STATUS_SUCCESS;
         }
 
+        /// <inheritdoc />
         public override int Open(string FileName, uint CreateOptions, uint GrantedAccess,
             out object? FileNode, out object? FileDesc, out FileInfo FileInfo, out string? NormalizedName)
         {
@@ -182,6 +188,7 @@ namespace BookFUSE
             return STATUS_SUCCESS;
         }
 
+        /// <inheritdoc />
         public override void Close(object FileNode, object FileDesc)
         {
             if (FileDesc is null) { return; }
@@ -189,6 +196,7 @@ namespace BookFUSE
             ((LibraryFileDesc)FileDesc).Stream?.Dispose();
         }
 
+        /// <inheritdoc />
         public override int Read(object FileNode, object FileDesc, nint Buffer, ulong Offset, uint Length, out uint BytesTransferred)
         {
             if (FileDesc is null)
@@ -220,18 +228,21 @@ namespace BookFUSE
             return STATUS_SUCCESS;
         }
 
+        /// <inheritdoc />
         public override int GetFileInfo(object FileNode, object FileDesc, out FileInfo FileInfo)
         {
             ((LibraryFileDesc)FileDesc).GetFileInfo(out FileInfo);
             return STATUS_SUCCESS;
         }
 
+        /// <inheritdoc />
         public override int GetSecurity(object FileNode, object FileDesc, ref byte[] SecurityDescriptor)
         {
             SecurityDescriptor = ((LibraryFileDesc)FileDesc).GetSecurityDescriptor();
             return STATUS_SUCCESS;
         }
 
+        /// <inheritdoc />
         public override bool ReadDirectoryEntry(object FileNode, object FileDesc, string Pattern, string Marker, ref object Context, out string? FileName, out FileInfo FileInfo)
         {
             LibraryFileDesc libraryFile = (LibraryFileDesc)FileDesc;
@@ -337,22 +348,27 @@ namespace BookFUSE
         /// The library path.
         /// </summary>
         private readonly string _Path;
+
         /// <summary>
-        /// The volume label for the file system.
+        /// The name of the file system.
         /// </summary>
-        private readonly string _VolumeLabel = "BookFUSE";
+        private readonly string PROGNAME = "BookFUSE";
+
         /// <summary>
         /// The Calibre library instance.
         /// </summary>
         private readonly CalibreLibrary _Library;
+
         /// <summary>
         /// The size of the allocation unit for the file system.
         /// </summary>
         protected const int ALLOCATION_UNIT = 4096;
+
         /// <summary>
         /// A timer used to delay the re-initialization of the library after file system changes.
         /// </summary>
         private Timer? _timer;
+
         /// <summary>
         /// A lock object to synchronize access to the timer and library re-initialization.
         /// </summary>
@@ -417,7 +433,7 @@ namespace BookFUSE
                 for (i = 1; i < Args.Length; i++)
                 {
                     string arg = Args[i];
-                    if (arg[0] != '-') { break; }
+                    if (arg[0] != '-') { continue; }
                     switch (arg[1])
                     {
                         case '?':
@@ -438,12 +454,12 @@ namespace BookFUSE
                             ArgToString(Args, ref i, ref volumePrefix);
                             break;
                         default:
-                            throw new CommandLineUsageException();
+                            throw new CommandLineUsageException("Unknown option: " + arg);
                     }
                 }
                 if (Args.Length > i)
                 {
-                    throw new CommandLineUsageException();
+                    throw new CommandLineUsageException("Invalid option provided");
                 }
                 if (path is null && volumePrefix != null)
                 {
@@ -462,13 +478,14 @@ namespace BookFUSE
                 }
                 if (path is null || mountPoint is null)
                 {
-                    throw new CommandLineUsageException();
+                    throw new CommandLineUsageException(path is null ?
+                        "Either [p]ath or [u]nc prefix must be specified" : "[m]ount point must be specified");
                 }
                 if (debugLogFile != null)
                 {
                     if (FileSystemHost.SetDebugLogFile(debugLogFile) > 0)
                     {
-                        throw new CommandLineUsageException("cannot open debug log file");
+                        throw new CommandLineUsageException("Cannot open debug log file");
                     }
                 }
 
@@ -477,7 +494,7 @@ namespace BookFUSE
                 host = new(bookFUSE) { Prefix = volumePrefix };
                 if (host.Mount(mountPoint, null, true, debugFlags) > 0)
                 {
-                    throw new CommandLineUsageException("cannot mount file system");
+                    throw new CommandLineUsageException("Cannot mount file system");
                 }
                 mountPoint = host.MountPoint();
                 _Host = host;

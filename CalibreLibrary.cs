@@ -5,8 +5,14 @@ namespace BookFUSE
 {
     public sealed class CalibreLibrary(string path)
     {
+        /// <summary>
+        /// The root file path for the Calibre library.
+        /// </summary>
         private readonly string _Path = path;
 
+        /// <summary>
+        /// The SQLite connection to the Calibre database.
+        /// </summary>
         private SQLiteConnection? sqlite;
 
         /// <summary>
@@ -14,6 +20,9 @@ namespace BookFUSE
         /// </summary>
         public List<Library> Libraries { get; } = [];
 
+        /// <summary>
+        /// The total size of all books in the Calibre library, in bytes.
+        /// </summary>
         public long VolumeSize = 0;
 
         /// <summary>
@@ -133,9 +142,7 @@ namespace BookFUSE
         /// <summary>
         /// Attempts to retrieve a library that matches the specified file name.
         /// </summary>
-        /// <remarks>A library is considered a match if the file name starts with the library's name
-        /// followed by a backslash ('\').</remarks>
-        /// <param name="fileName">The file name to search for. Must not be null or empty.</param>
+        /// <param name="fileName">The file name.</param>
         /// <param name="library">When the method returns <see langword="true"/>, contains the library that matches the specified file name.
         /// When the method returns <see langword="false"/>, contains <see langword="null"/>.</param>
         /// <returns><see langword="true"/> if a matching library is found; otherwise, <see langword="false"/>.</returns>
@@ -154,11 +161,12 @@ namespace BookFUSE
         public sealed record Library(string Name, List<Series> SeriesList)
         {
             /// <summary>
-            /// Get the series for the given file name.
+            /// Attempts to retrieve a series that matches the specified file name.
             /// </summary>
             /// <param name="fileName">The file name.</param>
-            /// <returns>The corresponding series.</returns>
-            /// <exception cref="KeyNotFoundException">No series was found for the given filename.</exception>
+            /// <param name="series">When the method returns <see langword="true"/>, contains the series that matches the specified file name.
+            /// When the method returns <see langword="false"/>, contains <see langword="null"/>.</param>
+            /// <returns><see langword="true"/> if a matching series is found; otherwise, <see langword="false"/>.</returns>
             public bool GetSeries(string fileName, [NotNullWhen(true)] out Series? series)
             {
                 if (fileName.Split('\\').Length < 3) { series = null; return false; } // series must be two levels deep
@@ -176,11 +184,12 @@ namespace BookFUSE
         public sealed record Series(string Name, List<Book> Books)
         {
             /// <summary>
-            /// Get the book for the given file name.
+            /// Attempts to retrieve a book that matches the specified file name.
             /// </summary>
             /// <param name="fileName">The file name.</param>
-            /// <returns>The corresponding book.</returns>
-            /// <exception cref="KeyNotFoundException">No book was found for the given filename.</exception>
+            /// <param name="book">When the method returns <see langword="true"/>, contains the book that matches the specified file name.
+            /// When the method returns <see langword="false"/>, contains <see langword="null"/>.</param>
+            /// <returns><see langword="true"/> if a matching book is found; otherwise, <see langword="false"/>.</returns>
             public bool GetBook(string fileName, [NotNullWhen(true)] out Book? book)
             {
                 if (fileName.Split('\\').Length < 4) { book = null; return false; } // book must be three levels deep
