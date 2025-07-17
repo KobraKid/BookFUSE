@@ -2,11 +2,30 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>BookFUSE.ico</ApplicationIcon>
+    <Title>BookFUSE</Title>
+    <Authors>Michael Huyler</Authors>
+    <Description>BookFUSE is a FUSE-based virtual filesystem for Windows that exposes a Calibre ebook library as a read-only filesystem, making it accessible to applications such as Kavita or other ebook readers that expect a directory structure of series and books.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/KobraKid/BookFUSE</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/KobraKid/BookFUSE</RepositoryUrl>
+    <PackageTags>Calibre; Kavita; ebook; WinFsp; FUSE</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="BookFUSE.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="System.Data.SQLite" Version="1.0.119" />
