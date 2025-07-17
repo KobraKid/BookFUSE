@@ -14,7 +14,7 @@
 
   <ItemGroup>
     <Reference Include="winfsp-msil">
-      <HintPath>..\..\..\..\..\Program Files (x86)\WinFsp\bin\winfsp-msil.dll</HintPath>
+      <HintPath>..\..\..\..\..\..\Program Files (x86)\WinFsp\bin\winfsp-msil.dll</HintPath>
     </Reference>
   </ItemGroup>
 

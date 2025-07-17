@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.14.36202.13
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BookFUSE", "BookFUSE.csproj", "{E6A722E9-1CAD-4127-B23A-F250D1662314}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BookFUSE", "BookFUSE\BookFUSE.csproj", "{E6A722E9-1CAD-4127-B23A-F250D1662314}"
 EndProject
 Project("{54435603-DBB4-11D2-8724-00A0C9A8B90C}") = "BookFUSESetup", "..\BookFUSESetup\BookFUSESetup.vdproj", "{A4C678B7-3703-2876-D5FB-70FC78DBDDAD}"
 EndProject
