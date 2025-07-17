@@ -1,4 +1,5 @@
-﻿using System.Data.SQLite;
+﻿using System.Data;
+using System.Data.SQLite;
 using System.Diagnostics.CodeAnalysis;
 
 namespace BookFUSE
@@ -52,7 +53,7 @@ namespace BookFUSE
         /// <param name="libraryName">The name of the library.</param>
         public void LoadLibraryInfo(string libraryName)
         {
-            Dictionary<int, Series> seriesList = [];
+            Dictionary<string, Series> seriesList = [];
             sqlite = new($"Data Source={_Path}\\{libraryName}\\metadata.db;New=False;");
             sqlite.Open();
             var command = sqlite.CreateCommand();
@@ -70,11 +71,11 @@ namespace BookFUSE
                         series.name,
                         series.id
                     FROM books
-                    INNER JOIN books_series_link ON books.id = books_series_link.book
-                    INNER JOIN data              ON books.id = data.book
-                    INNER JOIN series            ON books_series_link.series = series.id
+                    LEFT OUTER JOIN books_series_link ON books.id = books_series_link.book
+                    LEFT OUTER JOIN data              ON books.id = data.book
+                    FULL OUTER JOIN series            ON books_series_link.series = series.id
                 ";
-            using (var reader = command.ExecuteReader())
+            using (var reader = command.ExecuteReader(CommandBehavior.SingleResult))
             {
                 while (reader.Read())
                 {
@@ -85,14 +86,14 @@ namespace BookFUSE
                     string path = reader.GetString(col++).Replace('/', '\\');
                     DateTime timestamp = reader.GetDateTime(col++);
                     DateTime lastModified = reader.GetDateTime(col++);
-                    string fileName = reader.GetString(col++);
+                    string fileName = EscapeFileName(reader.GetString(col++));
                     string format = FormatToFileExtension(reader.GetString(col++));
-                    string seriesName = reader.GetString(col++).Replace(':', '_');
-                    int seriesId = reader.GetInt32(col++);
-                    if (!seriesList.TryGetValue(seriesId, out Series? series))
+                    string seriesName = EscapeFileName(reader.IsDBNull(col) ? fileName : reader.GetString(col++));
+                    int seriesId = reader.IsDBNull(col) ? -1 : reader.GetInt32(col++);
+                    if (!seriesList.TryGetValue(seriesName, out Series? series))
                     {
                         series = new(seriesName, []);
-                        seriesList[seriesId] = series;
+                        seriesList[seriesName] = series;
                     }
                     if (!series.Books.Any(book => (book.Title == title) && (book.Format == format)))
                     {
@@ -131,12 +132,26 @@ namespace BookFUSE
                 "AZW3" => "azw3",
                 "CBZ" => "cbz",
                 "EPUB" => "epub",
-                "ORIGINAL_EPUB" => "epub",
+                "ORIGINAL_EPUB" => "original_epub",
                 "MOBI" => "mobi",
                 "PDF" => "pdf",
                 "ZIP" => "zip",
                 _ => throw new NotSupportedException($"Unsupported format: {format}"),
             };
+        }
+
+        /// <summary>
+        /// Escapes a file name to ensure it is valid for use in a file system.
+        /// </summary>
+        /// <param name="fileName">The file name.</param>
+        /// <returns>A safe file name.</returns>
+        private static string EscapeFileName(string fileName)
+        {
+            foreach (char c in Path.GetInvalidFileNameChars())
+            {
+                fileName = fileName.Replace(c, '_');
+            }
+            return fileName;
         }
 
         /// <summary>
