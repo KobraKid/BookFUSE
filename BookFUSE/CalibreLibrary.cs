@@ -7,14 +7,9 @@ namespace BookFUSE
     public sealed class CalibreLibrary(string path)
     {
         /// <summary>
-        /// The root file path for the Calibre library.
+        /// The root file path for the calibre library.
         /// </summary>
         private readonly string _Path = path;
-
-        /// <summary>
-        /// The SQLite connection to the Calibre database.
-        /// </summary>
-        private SQLiteConnection? sqlite;
 
         /// <summary>
         /// Gets the collection of libraries associated with the application.
@@ -22,16 +17,15 @@ namespace BookFUSE
         public List<Library> Libraries { get; } = [];
 
         /// <summary>
-        /// The total size of all books in the Calibre library, in bytes.
+        /// The total size of all books in the calibre library, in bytes.
         /// </summary>
         public long VolumeSize = 0;
 
         /// <summary>
-        /// Initialize the Calibre library by loading series information from the database.
+        /// Initialize the calibre library by loading series information from the database.
         /// </summary>
         public void Init()
         {
-            Libraries.Clear();
             foreach (var dir in Directory.GetDirectories(_Path))
             {
                 var metadataPath = Path.Combine(dir, "metadata.db");
@@ -48,17 +42,18 @@ namespace BookFUSE
         }
 
         /// <summary>
-        /// Load the series information from the Calibre database.
+        /// Load the series information from the calibre database.
         /// </summary>
         /// <param name="libraryName">The name of the library.</param>
-        public void LoadLibraryInfo(string libraryName)
+        private void LoadLibraryInfo(string libraryName)
         {
             Dictionary<string, Series> seriesList = [];
-            sqlite = new($"Data Source={_Path}\\{libraryName}\\metadata.db;New=False;");
-            sqlite.Open();
-            var command = sqlite.CreateCommand();
-            command.CommandText =
-                @"
+            using (var sqlite = new SQLiteConnection($"Data Source={_Path}\\{libraryName}\\metadata.db;New=False;Mode=ReadOnly"))
+            {
+                sqlite.Open();
+                var command = sqlite.CreateCommand();
+                command.CommandText =
+                    @"
                     SELECT 
                         books.title,
                         books.author_sort,
@@ -75,43 +70,49 @@ namespace BookFUSE
                     LEFT OUTER JOIN data              ON books.id = data.book
                     FULL OUTER JOIN series            ON books_series_link.series = series.id
                 ";
-            using (var reader = command.ExecuteReader(CommandBehavior.SingleResult))
-            {
-                while (reader.Read())
+                command.CommandTimeout = 10;
+                try {
+                    using var reader = command.ExecuteReader(CommandBehavior.SingleResult);
+                    while (reader.Read())
+                    {
+                        int col = 0;
+                        string title = reader.GetString(col++);
+                        string author = reader.GetString(col++);
+                        double seriesIndex = reader.IsDBNull(col) ? 0 : reader.GetDouble(col++);
+                        string path = reader.GetString(col++).Replace('/', '\\');
+                        DateTime timestamp = reader.GetDateTime(col++);
+                        DateTime lastModified = reader.GetDateTime(col++);
+                        string fileName = EscapeFileName(reader.GetString(col++));
+                        string format = FormatToFileExtension(reader.GetString(col++));
+                        string seriesName = EscapeFileName(reader.IsDBNull(col) ? fileName : reader.GetString(col++));
+                        int seriesId = reader.IsDBNull(col) ? -1 : reader.GetInt32(col++);
+                        if (!seriesList.TryGetValue(seriesName, out Series? series))
+                        {
+                            series = new(seriesName, []);
+                            seriesList[seriesName] = series;
+                        }
+                        if (!series.Books.Any(book => (book.Title == title) && (book.Format == format)))
+                        {
+                            FileStream stream = new($"{_Path}\\{libraryName}\\{path}\\{fileName}.{format}",
+                                FileMode.Open,
+                                FileAccess.Read,
+                                FileShare.ReadWrite);
+                            series.Books.Add(new Book(
+                                title, author,
+                                seriesName, seriesIndex > 10000 ? "SP" + (seriesIndex % 10000).ToString().PadLeft(2, '0') : seriesIndex.ToString().PadLeft(2, '0'),
+                                fileName, format, path,
+                                stream.Length, timestamp, lastModified));
+                            stream.Dispose();
+                        }
+                    }
+                    Libraries.RemoveAll(l => l.Name == libraryName);
+                }
+                catch (SQLiteException)
                 {
-                    int col = 0;
-                    string title = reader.GetString(col++);
-                    string author = reader.GetString(col++);
-                    double seriesIndex = reader.IsDBNull(col) ? 0 : reader.GetDouble(col++);
-                    string path = reader.GetString(col++).Replace('/', '\\');
-                    DateTime timestamp = reader.GetDateTime(col++);
-                    DateTime lastModified = reader.GetDateTime(col++);
-                    string fileName = EscapeFileName(reader.GetString(col++));
-                    string format = FormatToFileExtension(reader.GetString(col++));
-                    string seriesName = EscapeFileName(reader.IsDBNull(col) ? fileName : reader.GetString(col++));
-                    int seriesId = reader.IsDBNull(col) ? -1 : reader.GetInt32(col++);
-                    if (!seriesList.TryGetValue(seriesName, out Series? series))
-                    {
-                        series = new(seriesName, []);
-                        seriesList[seriesName] = series;
-                    }
-                    if (!series.Books.Any(book => (book.Title == title) && (book.Format == format)))
-                    {
-                        FileStream stream = new($"{_Path}\\{libraryName}\\{path}\\{fileName}.{format}",
-                            FileMode.Open,
-                            FileAccess.Read,
-                            FileShare.ReadWrite);
-                        series.Books.Add(new Book(
-                            title, author,
-                            seriesName, seriesIndex > 10000 ? "SP" + (seriesIndex % 10000).ToString().PadLeft(2, '0') : seriesIndex.ToString().PadLeft(2, '0'),
-                            fileName, format, path,
-                            stream.Length, timestamp, lastModified));
-                        stream.Dispose();
-                    }
+                    // If the database is locked, we can't read it. This can happen if calibre is running.
+                    // In this case, we don't remove the library from the list, and we skip it, keeping the previous data intact.
                 }
             }
-            sqlite.Close();
-            sqlite.Dispose();
             foreach (var kvp in seriesList)
             {
                 kvp.Value.Books.Sort((a, b) => string.Compare(a.VirtualName, b.VirtualName, StringComparison.Ordinal));
@@ -122,7 +123,7 @@ namespace BookFUSE
         /// <summary>
         /// Transform the format string to a file extension.
         /// </summary>
-        /// <param name="format">The Calibre format string.</param>
+        /// <param name="format">The calibre format string.</param>
         /// <returns>A file extension string.</returns>
         /// <exception cref="NotSupportedException">The format string doesn't have a matching file extension.</exception>
         private static string FormatToFileExtension(string format)
@@ -147,6 +148,7 @@ namespace BookFUSE
         /// <returns>A safe file name.</returns>
         private static string EscapeFileName(string fileName)
         {
+            fileName = fileName.Replace(":", " -"); // Match Kavita style
             foreach (char c in Path.GetInvalidFileNameChars())
             {
                 fileName = fileName.Replace(c, '_');
@@ -169,7 +171,7 @@ namespace BookFUSE
         }
 
         /// <summary>
-        /// Represents a Calibre library containing series and books.
+        /// Represents a calibre library containing series and books.
         /// </summary>
         /// <param name="Name">The library folder name.</param>
         /// <param name="SeriesList">The list of series in the library, sorted by series name</param>
@@ -192,7 +194,7 @@ namespace BookFUSE
         }
 
         /// <summary>
-        /// Represents a series in the Calibre library.
+        /// Represents a series in the calibre library.
         /// </summary>
         /// <param name="Name">The series name.</param>
         /// <param name="Books">The list of books in the series.</param>
@@ -214,7 +216,7 @@ namespace BookFUSE
         }
 
         /// <summary>
-        /// Represents a book in the Calibre library.
+        /// Represents a book in the calibre library.
         /// </summary>
         /// <param name="Title">The book's title.</param>
         /// <param name="Author">The book's author.</param>

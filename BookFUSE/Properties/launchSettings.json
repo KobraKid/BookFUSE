@@ -2,7 +2,7 @@
   "profiles": {
     "BookFUSE": {
       "commandName": "Project",
-      "commandLineArgs": "-p \"C:\\Users\\Michael\\Kavita\\calibre\\Calibre Portable\" -m \"X:\" -u \"\\BookFUSE\\library\" -d -1 -D -"
+      "commandLineArgs": "-p \"C:\\Users\\Michael\\Kavita\\calibre\\Calibre Portable\" -m X: -u \\BookFUSE\\library -d -1 -D -"
     }
   }
 }

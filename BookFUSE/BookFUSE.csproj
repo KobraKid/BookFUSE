@@ -9,11 +9,11 @@
     <ApplicationIcon>BookFUSE.ico</ApplicationIcon>
     <Title>BookFUSE</Title>
     <Authors>Michael Huyler</Authors>
-    <Description>BookFUSE is a FUSE-based virtual filesystem for Windows that exposes a Calibre ebook library as a read-only filesystem, making it accessible to applications such as Kavita or other ebook readers that expect a directory structure of series and books.</Description>
+    <Description>BookFUSE is a FUSE-based virtual filesystem for Windows that exposes a calibre ebook library as a read-only filesystem, making it accessible to applications such as Kavita or other ebook readers that expect a directory structure of series and books.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/KobraKid/BookFUSE</PackageProjectUrl>
     <RepositoryUrl>https://github.com/KobraKid/BookFUSE</RepositoryUrl>
-    <PackageTags>Calibre; Kavita; ebook; WinFsp; FUSE</PackageTags>
+    <PackageTags>calibre; Kavita; ebook; WinFsp; FUSE</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

@@ -8,7 +8,7 @@ using VolumeInfo = Fsp.Interop.VolumeInfo;
 namespace BookFUSE
 {
     /// <summary>
-    /// Represents a FUSE file system which translates a Calibre library to a Kavita library.
+    /// Represents a FUSE file system which translates a calibre library to a Kavita library.
     /// </summary>
     [SupportedOSPlatform("windows")]
     class BookFUSE : FileSystemBase
@@ -23,7 +23,7 @@ namespace BookFUSE
         /// <summary>
         /// Create a new BookFUSE file system instance.
         /// </summary>
-        /// <param name="path">The Calibre library file path.</param>
+        /// <param name="path">The calibre library file path.</param>
         public BookFUSE(string path)
         {
             _Path = Path.GetFullPath(path);
@@ -355,7 +355,7 @@ namespace BookFUSE
         private readonly string PROGNAME = "BookFUSE";
 
         /// <summary>
-        /// The Calibre library instance.
+        /// The calibre library instance.
         /// </summary>
         private readonly CalibreLibrary _Library;
 
@@ -525,7 +525,7 @@ namespace BookFUSE
                     "    -d DebugFlags       [-1: enable all debug logs]\n" +
                     "    -D DebugLogFile     [file path; use - for stderr]\n" +
                     "    -u \\Server\\Share    [UNC prefix (single backslash)]\n" +
-                    "    -p Path             [path to Calibre directory]\n" +
+                    "    -p Path             [path to calibre directory]\n" +
                     "    -m MountPoint       [X:|*|directory]\n",
                     ex.HasMessage ? ex.Message + "\n" : "",
                     PROGNAME));
@@ -584,7 +584,7 @@ namespace BookFUSE
         private FileSystemHost? _Host;
 
         /// <summary>
-        /// The file system watcher instance that monitors changes in the Calibre library directory.
+        /// The file system watcher instance that monitors changes in the calibre library directory.
         /// </summary>
         private FileSystemWatcher? _Watcher;
     }

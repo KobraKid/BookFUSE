@@ -76,6 +76,14 @@
             "PrerequisitesLocation" = "2:1"
             "Url" = "8:"
             "ComponentsUrl" = "8:"
+                "Items"
+                {
+                    "{EDC2488A-8267-493A-A98E-7D9C3B36CDF3}:.NETFramework,Version=v4.7.2"
+                    {
+                    "Name" = "8:Microsoft .NET Framework 4.7.2 (x86 and x64)"
+                    "ProductCode" = "8:.NETFramework,Version=v4.7.2"
+                    }
+                }
             }
         }
     }
@@ -180,7 +188,7 @@
         "Subject" = "8:"
         "ARPCONTACT" = "8:Michael Huyler"
         "Keywords" = "8:"
-        "ARPCOMMENTS" = "8:BookFUSE is a FUSE-based virtual filesystem for Windows that exposes a Calibre ebook library as a read-only filesystem."
+        "ARPCOMMENTS" = "8:BookFUSE is a FUSE-based virtual filesystem for Windows that exposes a calibre ebook library as a read-only filesystem."
         "ARPURLINFOABOUT" = "8:https://github.com/KobraKid"
         "ARPPRODUCTICON" = "8:"
         "ARPIconIndex" = "3:0"
@@ -727,7 +735,7 @@
                             "ContextData" = "8:"
                             "Attributes" = "3:0"
                             "Setting" = "3:2"
-                            "Value" = "8:Enter the path to your Calibre installation. This should be the folder that contains the Calibre executable file (.exe)."
+                            "Value" = "8:Enter the path to your calibre installation. This should be the folder that contains the calibre executable file (.exe)."
                             "DefaultValue" = "8:#1215"
                             "UsePlugInResources" = "11:TRUE"
                             }
