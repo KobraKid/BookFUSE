@@ -9,7 +9,7 @@ namespace BookFUSE
         /// <summary>
         /// The root file path for the calibre library.
         /// </summary>
-        private readonly string _Path = path;
+        public readonly string Root = path;
 
         /// <summary>
         /// Gets the collection of libraries associated with the application.
@@ -26,7 +26,7 @@ namespace BookFUSE
         /// </summary>
         public void Init()
         {
-            foreach (var dir in Directory.GetDirectories(_Path))
+            foreach (var dir in Directory.GetDirectories(Root))
             {
                 var metadataPath = Path.Combine(dir, "metadata.db");
                 if (File.Exists(metadataPath))
@@ -48,7 +48,7 @@ namespace BookFUSE
         private void LoadLibraryInfo(string libraryName)
         {
             Dictionary<string, Series> seriesList = [];
-            using (var sqlite = new SQLiteConnection($"Data Source={_Path}\\{libraryName}\\metadata.db;New=False;Mode=ReadOnly"))
+            using (var sqlite = new SQLiteConnection($"Data Source={Path.Join(Root, libraryName, "metadata.db")};New=False;Mode=ReadOnly"))
             {
                 sqlite.Open();
                 var command = sqlite.CreateCommand();
@@ -71,7 +71,8 @@ namespace BookFUSE
                     FULL OUTER JOIN series            ON books_series_link.series = series.id
                 ";
                 command.CommandTimeout = 10;
-                try {
+                try
+                {
                     using var reader = command.ExecuteReader(CommandBehavior.SingleResult);
                     while (reader.Read())
                     {
@@ -93,7 +94,7 @@ namespace BookFUSE
                         }
                         if (!series.Books.Any(book => (book.Title == title) && (book.Format == format)))
                         {
-                            FileStream stream = new($"{_Path}\\{libraryName}\\{path}\\{fileName}.{format}",
+                            FileStream stream = new(Path.Join(Root, libraryName, path, fileName + "." + format),
                                 FileMode.Open,
                                 FileAccess.Read,
                                 FileShare.ReadWrite);

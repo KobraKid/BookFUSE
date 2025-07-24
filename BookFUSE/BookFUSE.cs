@@ -26,12 +26,12 @@ namespace BookFUSE
         /// <param name="path">The calibre library file path.</param>
         public BookFUSE(string path)
         {
-            _Path = Path.GetFullPath(path);
-            if (_Path.EndsWith('\\'))
+            var _path = Path.GetFullPath(path);
+            if (_path.EndsWith('\\'))
             {
-                _Path = _Path[..^1];
+                _path = _path[..^1];
             }
-            _Library = new(_Path);
+            _Library = new(_path);
         }
 
         /// <summary>
@@ -64,7 +64,7 @@ namespace BookFUSE
         /// <param name="fileName">The file name.</param>
         /// <returns>The file's absolute path.</returns>
         public string ConcatPath(string fileName)
-            => _Path + fileName;
+            => _Library.Root + fileName;
 
         /// <inheritdoc />
         public override int ExceptionHandler(Exception ex)
@@ -94,7 +94,7 @@ namespace BookFUSE
             host.PostCleanupWhenModifiedOnly = true;
             host.PassQueryDirectoryPattern = true;
             host.FlushAndPurgeOnCleanup = true;
-            host.VolumeCreationTime = (ulong)File.GetCreationTimeUtc(_Path).ToFileTimeUtc();
+            host.VolumeCreationTime = (ulong)File.GetCreationTimeUtc(_Library.Root).ToFileTimeUtc();
             host.VolumeSerialNumber = 0;
             return STATUS_SUCCESS;
         }
@@ -157,14 +157,14 @@ namespace BookFUSE
                 {
                     if (series.GetBook(FileName, out Book? book))
                     {
-                        LibraryFileDesc libraryFile = new(_Path, library, series, book);
+                        LibraryFileDesc libraryFile = new(_Library.Root, library, series, book);
                         libraryFile.GetFileInfo(out FileInfo);
                         FileNode = book;
                         FileDesc = libraryFile;
                     }
                     else // FileName is a series
                     {
-                        LibraryFileDesc libraryFile = new(_Path, library, series);
+                        LibraryFileDesc libraryFile = new(_Library.Root, library, series);
                         libraryFile.GetFileInfo(out FileInfo);
                         FileNode = series;
                         FileDesc = libraryFile;
@@ -172,7 +172,7 @@ namespace BookFUSE
                 }
                 else // FileName is a library
                 {
-                    LibraryFileDesc libraryFile = new(_Path, library);
+                    LibraryFileDesc libraryFile = new(_Library.Root, library);
                     libraryFile.GetFileInfo(out FileInfo);
                     FileNode = library;
                     FileDesc = libraryFile;
@@ -212,7 +212,7 @@ namespace BookFUSE
                 return STATUS_NOT_FOUND;
             }
 
-            libraryFile.Stream ??= new($"{_Path}\\{libraryFile.Library.Name}\\{libraryFile.Book.Path}\\{libraryFile.Book.PhysicalName}",
+            libraryFile.Stream ??= new(Path.Join(_Library.Root, libraryFile.Library.Name, libraryFile.Book.Path, libraryFile.Book.PhysicalName),
                     FileMode.Open,
                     FileAccess.Read,
                     FileShare.ReadWrite);
@@ -275,7 +275,7 @@ namespace BookFUSE
                         {
                             Context = index + 1;
                             FileName = books[index].VirtualName;
-                            new LibraryFileDesc(_Path, libraryFile.Library, libraryFile.Series, books[index]).GetFileInfo(out FileInfo);
+                            new LibraryFileDesc(_Library.Root, libraryFile.Library, libraryFile.Series, books[index]).GetFileInfo(out FileInfo);
                             return true;
                         }
                         else
@@ -303,7 +303,7 @@ namespace BookFUSE
                     {
                         Context = index + 1;
                         FileName = series[index].Name;
-                        new LibraryFileDesc(_Path, libraryFile.Library, series[index]).GetFileInfo(out FileInfo);
+                        new LibraryFileDesc(_Library.Root, libraryFile.Library, series[index]).GetFileInfo(out FileInfo);
                         return true;
                     }
                     else
@@ -331,7 +331,7 @@ namespace BookFUSE
                 {
                     Context = index + 1;
                     FileName = libraries[index].Name;
-                    new LibraryFileDesc(_Path, libraries[index]).GetFileInfo(out FileInfo);
+                    new LibraryFileDesc(_Library.Root, libraries[index]).GetFileInfo(out FileInfo);
                     return true;
                 }
                 else
@@ -343,11 +343,6 @@ namespace BookFUSE
             }
             throw new DirectoryNotFoundException(libraryFile.ToString());
         }
-
-        /// <summary>
-        /// The library path.
-        /// </summary>
-        private readonly string _Path;
 
         /// <summary>
         /// The name of the file system.
@@ -394,7 +389,7 @@ namespace BookFUSE
         /// <summary>
         /// The program name for logging purposes.
         /// </summary>
-        private const string PROGNAME = "bookFUSE";
+        private const string PROGNAME = "BookFUSE";
 
         /// <summary>
         /// Construct a new BookFUSE service instance.
