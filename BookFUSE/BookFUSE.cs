@@ -129,7 +129,22 @@ namespace BookFUSE
                         // Remove directory attribute for books
                         attributes &= ~System.IO.FileAttributes.Directory;
                     }
+                    else if (FileName != Path.Join("\\", library.Name, series.Name))
+                    {
+                        FileAttributes = (uint)System.IO.FileAttributes.None;
+                        return STATUS_NOT_FOUND;
+                    }
                 }
+                else if (FileName != Path.Join("\\", library.Name))
+                {
+                    FileAttributes = (uint)System.IO.FileAttributes.None;
+                    return STATUS_NOT_FOUND;
+                }
+            }
+            else
+            {
+                FileAttributes = (uint)System.IO.FileAttributes.None;
+                return STATUS_NOT_FOUND;
             }
             FileAttributes = (uint)attributes;
             return STATUS_SUCCESS;
@@ -162,6 +177,13 @@ namespace BookFUSE
                         FileNode = book;
                         FileDesc = libraryFile;
                     }
+                    else if (FileName != Path.Join("\\", library.Name, series.Name))
+                    {
+                        FileNode = default;
+                        FileDesc = default;
+                        FileInfo = default;
+                        return STATUS_NOT_FOUND;
+                    }
                     else // FileName is a series
                     {
                         LibraryFileDesc libraryFile = new(_Library.Root, library, series);
@@ -170,6 +192,13 @@ namespace BookFUSE
                         FileDesc = libraryFile;
                     }
                 }
+                else if (FileName != Path.Join("\\", library.Name))
+                {
+                    FileNode = default;
+                    FileDesc = default;
+                    FileInfo = default;
+                    return STATUS_NOT_FOUND;
+                }
                 else // FileName is a library
                 {
                     LibraryFileDesc libraryFile = new(_Library.Root, library);
@@ -177,6 +206,13 @@ namespace BookFUSE
                     FileNode = library;
                     FileDesc = libraryFile;
                 }
+            }
+            else if (FileName != "\\")
+            {
+                FileNode = default;
+                FileDesc = default;
+                FileInfo = default;
+                return STATUS_NOT_FOUND;
             }
             else // FileName is the directory root
             {
