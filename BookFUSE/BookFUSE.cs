@@ -1,6 +1,7 @@
 ﻿using Fsp;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Text.RegularExpressions;
 using static BookFUSE.CalibreLibrary;
 using FileInfo = Fsp.Interop.FileInfo;
 using VolumeInfo = Fsp.Interop.VolumeInfo;
@@ -293,7 +294,7 @@ namespace BookFUSE
                     // Parse a series folder
                     if (libraryFile.Series != null)
                     {
-                        var books = libraryFile.Series.Books.Where(book => book.VirtualName.Contains(Pattern, StringComparison.OrdinalIgnoreCase)).ToArray();
+                        var books = libraryFile.Series.Books.Where(book => Regex.IsMatch(book.VirtualName, Pattern, RegexOptions.IgnoreCase)).ToArray();
                         if (Context is null)
                         {
                             if (Marker != null)
@@ -301,17 +302,31 @@ namespace BookFUSE
                                 index = Array.BinarySearch([.. books.Select(b => b.VirtualName)], Marker);
                                 if (index >= 0) { index++; }
                                 else { index = ~index; }
+                                index = index + 2;
                             }
                         }
                         else
                         {
                             index = (int)Context;
                         }
-                        if (index < books.Length)
+                        if (index < books.Length + 2)
                         {
                             Context = index + 1;
-                            FileName = books[index].VirtualName;
-                            new LibraryFileDesc(_Library.Root, libraryFile.Library, libraryFile.Series, books[index]).GetFileInfo(out FileInfo);
+                            if (index == 0)
+                            {
+                                FileName = ".";
+                                new LibraryFileDesc(_Library.Root, libraryFile.Library, libraryFile.Series).GetFileInfo(out FileInfo);
+                            }
+                            else if (index == 1)
+                            {
+                                FileName = "..";
+                                new LibraryFileDesc(_Library.Root, libraryFile.Library).GetFileInfo(out FileInfo);
+                            }
+                            else
+                            {
+                                FileName = books[index - 2].VirtualName;
+                                new LibraryFileDesc(_Library.Root, libraryFile.Library, libraryFile.Series, books[index - 2]).GetFileInfo(out FileInfo);
+                            }
                             return true;
                         }
                         else
@@ -321,7 +336,7 @@ namespace BookFUSE
                             return false;
                         }
                     }
-                    var series = libraryFile.Library.SeriesList.Where(series => series.Name.Contains(Pattern, StringComparison.OrdinalIgnoreCase)).ToArray();
+                    var series = libraryFile.Library.SeriesList.Where(series => Regex.IsMatch(series.Name, Pattern, RegexOptions.IgnoreCase)).ToArray();
                     if (Context is null)
                     {
                         if (Marker != null)
@@ -329,17 +344,31 @@ namespace BookFUSE
                             index = Array.BinarySearch([.. series.Select(s => s.Name)], Marker);
                             if (index >= 0) { index++; }
                             else { index = ~index; }
+                            index = index + 2;
                         }
                     }
                     else
                     {
                         index = (int)Context;
                     }
-                    if (index < series.Length)
+                    if (index < series.Length + 2)
                     {
                         Context = index + 1;
-                        FileName = series[index].Name;
-                        new LibraryFileDesc(_Library.Root, libraryFile.Library, series[index]).GetFileInfo(out FileInfo);
+                        if (index == 0)
+                        {
+                            FileName = ".";
+                            new LibraryFileDesc(_Library.Root, libraryFile.Library).GetFileInfo(out FileInfo);
+                        }
+                        else if (index == 1)
+                        {
+                            FileName = "..";
+                            new LibraryFileDesc(_Library.Root).GetFileInfo(out FileInfo);
+                        }
+                        else
+                        {
+                            FileName = series[index - 2].Name;
+                            new LibraryFileDesc(_Library.Root, libraryFile.Library, series[index - 2]).GetFileInfo(out FileInfo);
+                        }
                         return true;
                     }
                     else
@@ -349,7 +378,7 @@ namespace BookFUSE
                         return false;
                     }
                 }
-                var libraries = _Library.Libraries.Where(lib => lib.Name.Contains(Pattern, StringComparison.OrdinalIgnoreCase)).ToArray();
+                var libraries = _Library.Libraries.Where(lib => Regex.IsMatch(lib.Name, Pattern, RegexOptions.IgnoreCase)).ToArray();
                 if (Context is null)
                 {
                     if (Marker != null)
